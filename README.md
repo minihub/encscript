@@ -29,10 +29,11 @@ The script produces a self-containing `genscript.sh` shell script that extracts 
    
    # Check for binutils (for ar) and openssl
    check_command "ar"
+   check_command "bzip2"
    check_command "openssl"
    ```
    - The `check_command` function checks if a command is available on the system using `command -v`.
-   - It checks for the presence of `ar` (from binutils) and `openssl`. If either command is not found, it calls the `die` function with an appropriate error message.
+   - It checks for the presence of `ar` (from binutils), `bzip2` and `openssl`. If either command is not found, it calls the `die` function with an appropriate error message.
 4. Argument Check:
    ```bash
    if [ "$#" -ne 1 ]; then
