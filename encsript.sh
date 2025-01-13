@@ -10,7 +10,7 @@ check_command() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is not installed. Please install it first."
 }
 
-# Check for binutils (for ar) and openssl
+# Check for ar (from binutils), bzip2 and openssl
 check_command "ar"
 check_command "bzip2"
 check_command "openssl"
