@@ -1,8 +1,15 @@
-#! /bin/bash
+#!/bin/bash
+
+set -euo pipefail  # Exit on error, unset variable, or pipeline failure
 
 die() {
-    echo "ERROR: $1" >& 2
+    printf "ERROR: %s\n" "$1" >&2
     exit 1
+}
+
+usage() {
+    printf "Usage: %s <path_to_file>\n" "$(basename "$0")"
+    exit 0
 }
 
 # Check for required commands
@@ -10,14 +17,31 @@ check_command() {
     command -v "$1" >/dev/null 2>&1 || die "$1 is not installed. Please install it first."
 }
 
-# Check for ar (from binutils), bzip2 and openssl
+# Check for sufficient disk space
+check_disk_space() {
+    local required_space=$1
+    local available_space
+    available_space=$(df "$PWD" | awk 'NR==2 {print $4}')
+    if (( available_space < required_space )); then
+        die "Insufficient disk space. Required: ${required_space}K, Available: ${available_space}K"
+    fi
+}
+
+# Check for required commands
 check_command "ar"
 check_command "bzip2"
 check_command "openssl"
 
+# Determine the checksum command based on the OS
+if command -v md5sum >/dev/null 2>&1; then
+    CHECKSUM_CMD="md5sum"
+else
+    CHECKSUM_CMD="md5"
+fi
+
 # Check if the correct number of arguments is provided
 if [ "$#" -ne 1 ]; then
-    die "Usage: $0 <path_to_file>"
+    usage
 fi
 
 INPUT_FILE="$1"
@@ -27,61 +51,75 @@ if [ ! -f "$INPUT_FILE" ]; then
     die "File not found: $INPUT_FILE"
 fi
 
+# Check for sufficient disk space (estimate size of output files)
+check_disk_space 1024  # Adjust as necessary for your use case
+
 # Define output filenames
-BZIP2_FILE="$INPUT_FILE.bz2"
-CHECKSUM_FILE="$BZIP2_FILE.md5"
-TEMP_ARCHIVE="temporary.ar"
+BZIP2_FILE="${INPUT_FILE}.bz2"
+CHECKSUM_FILE="${BZIP2_FILE}.md5"
+TEMP_ARCHIVE=$(mktemp) || die "Failed to create temporary archive!"
 GENSCRIPT="genscript.sh"
 
+# Cleanup function
+cleanup() {
+    rm -f "$BZIP2_FILE" "$CHECKSUM_FILE" "$TEMP_ARCHIVE"
+}
+trap cleanup EXIT
+
 # Compress the input file with bzip2, preserving attributes
-bzip2 -k "$INPUT_FILE" || die "Failed to compress the file!"
+echo "Compressing the input file..."
+bzip2 -k "$INPUT_FILE"
+echo "Compression completed: $BZIP2_FILE"
 
 # Generate the MD5 checksum
-md5sum "$BZIP2_FILE" > "$CHECKSUM_FILE" || die "Failed to generate checksum!"
+echo "Generating MD5 checksum..."
+if [ "$CHECKSUM_CMD" = "md5sum" ]; then
+    $CHECKSUM_CMD "$BZIP2_FILE" > "$CHECKSUM_FILE"
+else
+    md5 "$BZIP2_FILE" | awk '{print $NF, $1}' > "$CHECKSUM_FILE"
+fi
+echo "Checksum generated: $CHECKSUM_FILE"
 
 # Create a temporary archive containing the bzip2 file and its checksum
-ar rcs "$TEMP_ARCHIVE" "$BZIP2_FILE" "$CHECKSUM_FILE" || die "Failed to create archive!"
+echo "Creating temporary archive..."
+ar rcs "$TEMP_ARCHIVE" "$BZIP2_FILE" "$CHECKSUM_FILE"
+echo "Temporary archive created: $TEMP_ARCHIVE"
 
 # Generate the genscript.sh file
+echo "Generating the extraction script..."
 {
-    echo "#! /bin/bash"
-    echo "# This is file \"genscript.sh\"."
-    echo "die() { echo \"ERROR: \$1\" >& 2; exit 1; }"
-    echo ""
-    echo "# Check for required commands"
-    echo "check_command() {"
-    echo "    command -v \"\$1\" >/dev/null 2>&1 || die \"\$1 is not installed. Please install it first.\""
-    echo "}"
-    echo ""
-    echo "# Check for binutils (for ar) and openssl"
-    echo "check_command \"ar\""
-    echo "check_command \"openssl\""
-    echo ""
-    echo "echo \"Decoding attachment - please standby.\""
-    echo "{"
-    echo "    while read LINE; do test \"\$LINE\" = \"exit\" && break; done"
-    echo "    openssl enc -d -a;"
-    echo "} < \"\$0\" > script.ar || {"
-    echo "    die \"Error in base64-encoded text!\";"
-    echo "}"
-    echo "ar -x script.ar || die \"Cannot extract archive!\""
-    echo "BZIP2_FILE=\"$(basename "$BZIP2_FILE")\";"
-    echo "CHECKSUM_FILE=\"\$BZIP2_FILE.md5\";"
-    echo "md5sum -c \"\$CHECKSUM_FILE\" || {"
-    echo "    die \"Checksum error in extracted bzip2 file!\";"
-    echo "}"
-    echo "bunzip2 -f \"\$BZIP2_FILE\" || die \"Corrupted bzip2 archive!\""
-    echo "echo \"Script extracted successfully!\""
-    echo "rm script.ar \"\$CHECKSUM_FILE\""
-    echo "exit"
+    printf "#! /bin/bash\n"
+    printf "# This is file \"genscript.sh\".\n"
+    printf "die() { printf \"ERROR: \$1\\n\" >&2; exit 1; }\n\n"
+    printf "# Check for required commands\n"
+    printf "check_command() {\n"
+    printf "    command -v \"\$1\" >/dev/null 2>&1 || die \"\$1 is not installed. Please install it first.\"\n"
+    printf "}\n\n"
+    printf "# Check for binutils (for ar) and openssl\n"
+    printf "check_command \"ar\"\n"
+    printf "check_command \"openssl\"\n\n"
+    printf "echo \"Decoding attachment - please standby.\"\n"
+    printf "{\n"
+    printf "    while read LINE; do test \"\$LINE\" = \"exit\" && break; done\n"
+    printf "    openssl enc -d -a;\n"
+    printf "} < \"\$0\" > script.ar || {\n"
+    printf "    die \"Error in base64-encoded text!\";\n"
+    printf "}\n"
+    printf "ar -x script.ar || die \"Cannot extract archive!\"\n"
+    printf "BZIP2_FILE=\"%s\";\n" "$(basename "$BZIP2_FILE")"
+    printf "CHECKSUM_FILE=\"\$BZIP2_FILE.md5\";\n"
+    printf "%s -c \"\$CHECKSUM_FILE\" || {\n" "$CHECKSUM_CMD"
+    printf "    die \"Checksum error in extracted bzip2 file!\";\n"
+    printf "}\n"
+    printf "bunzip2 -f \"\$BZIP2_FILE\" || die \"Corrupted bzip2 archive!\"\n"
+    printf "echo \"Script extracted successfully!\"\n"
+    printf "rm script.ar \"\$CHECKSUM_FILE\"\n"
+    printf "exit\n"
     # Output the base64 encoded content of the temporary archive
     base64 "$TEMP_ARCHIVE"
 } > "$GENSCRIPT" || die "Failed to create genscript.sh!"
 
-# Clean up temporary files
-rm "$BZIP2_FILE" "$CHECKSUM_FILE" "$TEMP_ARCHIVE"
-
-echo "Shell script generated successfully: $GENSCRIPT"
-
 # Make the generated script executable
-chmod +x "$GENSCRIPT" || die "Failed to make $GENSCRIPT executable!"
+chmod +x "$GENSCRIPT"
+echo "Extraction script generated: $GENSCRIPT"
+echo "Process completed successfully!"
