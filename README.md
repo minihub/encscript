@@ -1,101 +1,86 @@
-# Overview
+# Encrypted File Compression and Extraction Scripts
 
-This script is designed to take a file as input, compress it, generate a checksum, create an archive containing the compressed file and its checksum, and then generate a self-extracting script that can decode and extract the original file from the archive.
+This repository contains two scripts designed to compress a file, generate an MD5 checksum, and create an encrypted archive that can be extracted using a self-contained extraction script. The scripts are useful for securely distributing files with built-in integrity checks.
+
+## Files
+
+- **`encscript.sh`**: A Bash script for Linux and macOS systems.
+- **`encscript.ps1`**: A PowerShell script for Windows systems.
+
+## System Requirements
+
+- **`encscript.sh`**: Designed for Linux and macOS systems with `ar`, `bzip2`, `openssl`, and `md5sum` or `md5` installed.
+- **`encscript.ps1`**: Designed for Windows systems with `7z` (7-Zip) and `CertUtil` installed.
+
+## How It Works
+
+Both scripts perform the following tasks:
+
+- **Compress the Input File**: Uses `bzip2` (Linux/macOS) or `7z` (Windows) to compress the input file.
+- **Generate an MD5 Checksum**: Creates an MD5 checksum for the compressed file to ensure data integrity.
+- **Create a Temporary Archive**: Combines the compressed file and its checksum into a temporary archive.
+- **Generate an Extraction Script**: Creates a self-contained extraction script that includes the base64-encoded content of the temporary archive.
 
 ## Usage
 
-```shell
-encscript.sh /path/to/some/file
-```
-The script produces a self-containing `genscript.sh` shell script that extracts it's content inplace where executed, as described above.
+### **Step 1: Compress and Encrypt a File**
 
-## Breakdown
-1. Shebang and Function Definitions:
-   ```bash
-   #! /bin/bash
-   
-   die() {
-       echo "ERROR: $1" >& 2
-       exit 1
-   }
-   ```
-   - The script starts with a shebang (`#! /bin/bash`), indicating that it should be run in the Bash shell.
-   - The `die` function is defined to print an error message and exit the script if an error occurs.
-3. Check for Required Commands:
-   ```bash
-   check_command() {
-       command -v "$1" >/dev/null 2>&1 || die "$1 is not installed. Please install it first."
-   }
-   
-   # Check for ar (from binutils), bzip2 and openssl
-   check_command "ar"
-   check_command "bzip2"
-   check_command "openssl"
-   ```
-   - The `check_command` function checks if a command is available on the system using `command -v`.
-   - It checks for the presence of `ar` (from binutils), `bzip2` and `openssl`. If either command is not found, it calls the `die` function with an appropriate error message.
-4. Argument Check:
-   ```bash
-   if [ "$#" -ne 1 ]; then
-       die "Usage: $0 <path_to_file>"
-   fi
-   
-   INPUT_FILE="$1"
-   ```
-   - The script checks if exactly one argument (the path to the input file) is provided. If not, it exits with a usage message.
-   - The input file path is stored in the variable `INPUT_FILE`.
-5. File Existence Check:
-   ```bash
-   if [ ! -f "$INPUT_FILE" ]; then
-       die "File not found: $INPUT_FILE"
-   fi
-   ```
-   The script checks if the provided file exists. If it does not, it exits with an error message.
-6. Define Output Filenames:
-   ```bash
-   BZIP2_FILE="$INPUT_FILE.bz2"
-   CHECKSUM_FILE="$BZIP2_FILE.md5"
-   TEMP_ARCHIVE="temporary.ar"
-   GENSCRIPT="genscript.sh"
-   ```
-   The script defines several output filenames:
-   - `BZIP2_FILE`:    The name of the compressed file.
-   - `CHECKSUM_FILE`: The name of the MD5 checksum file.
-   - `TEMP_ARCHIVE`:  The name of the temporary archive file.
-   - `GENSCRIPT`:     The name of the generated script file.
-7. Compress the Input File:
-   ```bash
-   bzip2 -k "$INPUT_FILE" || die "Failed to compress the file!"
-   ```
-   The script compresses the input file using `bzip2` with the `-k` option to keep the original file. If compression fails, it exits with an error message.
-8. Generate the MD5 Checksum:
-   ```bash
-   md5sum "$BZIP2_FILE" > "$CHECKSUM_FILE" || die "Failed to generate checksum!"
-   ```
-   The script generates an MD5 checksum for the compressed file and saves it to the checksum file. If this fails, it exits with an error message.
-9. Create a Temporary Archive:
-   ```bash
-   ar rcs "$TEMP_ARCHIVE" "$BZIP2_FILE" "$CHECKSUM_FILE" || die "Failed to create archive!"
-   ```
-   The script creates a temporary archive using `ar`, which includes the compressed file and its checksum. If this fails, it exits with an error message.
-10. Generate the `genscript.sh` File:
-    ```bash
-    {
-      echo "#! /bin/bash"
-      echo "# This is file \"genscript.sh\"."
-      ...
-      # Output the base64 encoded content of the temporary archive
-      base64 "$TEMP_ARCHIVE"
-    } > "$GENSCRIPT" || die "Failed to create genscript.sh!"
-    ```
-    The script generates a new shell script named `genscript.sh`. This script contains:
-     - A shebang and a `die` function.
-     - A function to check for required commands (`ar` and `openssl`).
-     - Logic to decode the base64-encoded content of the temporary archive and extract the files.
-     - Commands to verify the checksum and decompress the bzip2 file.
-       
-    The base64-encoded content of the temporary archive is appended to the end of the generated script.
-11. Clean Up Temporary Files:
-    ```bash
-    rm "$BZIP2_FILE" "$CHECKSUM_FILE" "$TEMP_ARCHIVE"
-    ```
+1. Run the script with the file you want to compress and encrypt as an argument:
+   - For Linux/macOS:
+     ```bash
+     ./encscript.sh <path_to_file>
+     ```
+   - For Windows:
+     ```powershell
+     .\encscript.ps1 <path_to_file>
+     ```
+2. The script will generate a self-contained extraction script that contains the compressed and encrypted data.
+
+### **Step 2: Extract the File**
+
+1. Transfer the extraction script to the target system.
+2. Run the extraction script to extract the original file:
+   - For Linux/macOS:
+     ```bash
+     ./genscript.sh
+     ```
+   - For Windows:
+     ```powershell
+     .\genscript.ps1
+     ```
+3. The script will extract and decompress the file, verifying its integrity in the process.
+
+## Example
+
+### Compressing a File
+
+- For Linux/macOS:
+```bash
+./encscript.sh myfile.txt
+```
+- For Windows:
+```powershell
+.\encscript.ps1 myfile.txt
+```
+This will generate a self-contained extraction script that contains the compressed and encrypted version of `myfile.txt`.
+
+### Extracting the File
+
+- For Linux/macOS:
+```bash
+./genscript.sh
+```
+- For Windows:
+```powershell
+.\genscript.ps1
+```
+This will extract `myfile.txt` from the extraction script, decompress it, and verify its integrity.
+
+## Notes
+
+- Ensure that the target system has the necessary commands installed before running the extraction script.
+- The extraction script is self-contained and can be distributed independently.
+
+## License
+
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
